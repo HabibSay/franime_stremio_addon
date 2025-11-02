@@ -1,0 +1,37 @@
+{
+	"name": "stremio-addon-FRAnime",
+	"version": "1.0.0",
+	"description": "Animes Streaming from FR Anime",
+	"scripts": {
+		"start": "node server.js -- --launch",
+		"test": "jest",
+		"test:watch": "jest --watch",
+		"validate-config": "node scripts/validate-config.js",
+		"generate-env": "node scripts/validate-config.js --generate-env",
+		"poster:stats": "node scripts/poster-maintenance.js --stats",
+		"poster:clear-cache": "node scripts/poster-maintenance.js --clear-cache",
+		"poster:reset-sources": "node scripts/poster-maintenance.js --reset-sources",
+		"poster:validate": "node scripts/poster-maintenance.js --validate-sources",
+		"poster:reset-metrics": "node scripts/poster-maintenance.js --reset-metrics",
+		"poster:help": "node scripts/poster-maintenance.js --help",
+		"poster:diagnose": "node scripts/diagnose-system.js",
+		"logs:analyze": "node scripts/analyze-logs.js",
+		"logs:tail": "tail -f logs/poster-system.log 2>/dev/null || echo 'No log file found. Enable LOG_TO_FILE=true'",
+		"logs:errors": "grep '❌' logs/poster-system.log | tail -20 2>/dev/null || echo 'No log file found'",
+		"logs:performance": "grep '📊' logs/poster-system.log | tail -10 2>/dev/null || echo 'No log file found'",
+		"docs:open": "echo 'Documentation available in docs/ folder:' && ls -la docs/",
+		"docs:usage": "cat docs/USAGE_GUIDE.md | head -50",
+		"docs:config": "cat docs/CONFIGURATION_GUIDE.md | head -50",
+		"docs:troubleshoot": "cat docs/TROUBLESHOOTING.md | head -50"
+	},
+	"dependencies": {
+		"dotenv": "^17.2.3",
+		"express": "^5.1.0",
+		"puppeteer": "^24.27.0",
+		"stremio-addon-sdk": "1.1.x"
+	},
+	"devDependencies": {
+		"jest": "^29.7.0",
+		"supertest": "^7.1.4"
+	}
+}
