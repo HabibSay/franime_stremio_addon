@@ -1,6 +1,7 @@
 // addon.js
 const { addonBuilder } = require('stremio-addon-sdk');
 const scrapeAnimeCatalog = require('./utils/scrapeCatalog');
+const { scrapeVideoStreams, scrapeEpisodeList, formatStreamsForStremio } = require('./utils/scrapeStreams');
 const { PosterManager } = require('./poster-system');
 const { loadConfig, displayConfig } = require('./config/poster-config');
 const { KitsuSource } = require('./utils/kitsu');
@@ -9,6 +10,10 @@ const NautiljonSource = require('./poster-system/sources/NautiljonSource');
 
 // Mapping global slug → anime_id (pour les streams plus tard)
 const ANIME_ID_MAP = {};
+
+// Cache for episode lists to avoid repeated scraping
+const EPISODE_CACHE = {};
+const EPISODE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
 // Catalogue en cache
 let CACHED_CATALOG = [];
@@ -244,7 +249,7 @@ builder.defineCatalogHandler(async ({ type }) => {
 });
 
 // Métadonnées
-builder.defineMetaHandler(({ id }) => {
+builder.defineMetaHandler(async ({ id }) => {
   if (!id.startsWith('franime:')) return { meta: null };
   const slug = id.replace('franime:', '');
   const anime_id = ANIME_ID_MAP[slug];
@@ -252,23 +257,106 @@ builder.defineMetaHandler(({ id }) => {
 
   const cachedCatalog = getCachedCatalog();
   const cachedAnime = cachedCatalog.find(a => a.slug === slug);
+  const animeName = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  // Check episode cache
+  const cacheKey = `${slug}:${anime_id}`;
+  let episodes = [];
+  
+  if (EPISODE_CACHE[cacheKey] && Date.now() - EPISODE_CACHE[cacheKey].timestamp < EPISODE_CACHE_TTL) {
+    episodes = EPISODE_CACHE[cacheKey].episodes;
+    console.log(`📋 Using cached episode list for ${slug}: ${episodes.length} episodes`);
+  } else {
+    // Fetch episode list
+    try {
+      console.log(`🔍 Fetching episode list for ${slug}...`);
+      episodes = await scrapeEpisodeList(slug, anime_id, 1, 'vo');
+      
+      // Cache the results
+      EPISODE_CACHE[cacheKey] = {
+        episodes,
+        timestamp: Date.now()
+      };
+    } catch (error) {
+      console.error(`❌ Error fetching episodes for ${slug}:`, error.message);
+      // Return a default set of episodes if scraping fails
+      episodes = Array.from({ length: 12 }, (_, i) => ({ episode: i + 1 }));
+    }
+  }
+
+  // Format episodes as videos for Stremio
+  const videos = episodes.map(ep => ({
+    id: `franime:${slug}:${ep.episode}`,
+    title: `Episode ${ep.episode}`,
+    episode: ep.episode,
+    season: 1,
+    released: new Date().toISOString()
+  }));
 
   return {
     meta: {
       id,
       type: 'anime',
-      name: slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+      name: animeName,
       poster: cachedAnime?.posterUrl || 'https://via.placeholder.com/300x450?text=Pas+de+poster',
-	  releaseInfo: 'Release Date goes here',
-	  posterShape: 'poster',
-	  description: 'Description goes here'
+      releaseInfo: 'FRAnime',
+      posterShape: 'poster',
+      description: `Regardez ${animeName} en streaming VOSTFR sur FRAnime`,
+      videos: videos
     }
   };
 });
 
-// Streams (à compléter plus tard pour Sibnet/Sendvid)
-builder.defineStreamHandler(({ id, videoId }) => {
-  return { streams: [] }; // placeholder
+// Stream handler - retrieves video URLs for playback
+builder.defineStreamHandler(async ({ id, type }) => {
+  console.log(`🎬 Stream request for: ${id}`);
+  
+  if (!id.startsWith('franime:')) {
+    return { streams: [] };
+  }
+
+  // Parse the ID: franime:slug:episode
+  const parts = id.split(':');
+  if (parts.length < 3) {
+    console.warn(`⚠️ Invalid stream ID format: ${id}`);
+    return { streams: [] };
+  }
+
+  const slug = parts[1];
+  const episode = parseInt(parts[2], 10);
+  const animeId = ANIME_ID_MAP[slug];
+
+  if (!animeId) {
+    console.warn(`⚠️ No anime_id found for slug: ${slug}`);
+    return { streams: [] };
+  }
+
+  if (isNaN(episode) || episode < 1) {
+    console.warn(`⚠️ Invalid episode number: ${parts[2]}`);
+    return { streams: [] };
+  }
+
+  const animeName = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+  try {
+    // Scrape video streams for this episode
+    const rawStreams = await scrapeVideoStreams(slug, animeId, episode, 1, 'vo');
+    
+    if (rawStreams.length === 0) {
+      console.log(`⚠️ No streams found for ${slug} Episode ${episode}`);
+      return { streams: [] };
+    }
+
+    // Format streams for Stremio
+    const formattedStreams = formatStreamsForStremio(rawStreams, animeName, episode);
+    
+    console.log(`✅ Returning ${formattedStreams.length} streams for ${slug} Episode ${episode}`);
+    return { streams: formattedStreams };
+
+  } catch (error) {
+    console.error(`❌ Error scraping streams for ${slug} Episode ${episode}:`, error.message);
+    return { streams: [] };
+  }
 });
 
 module.exports = builder.getInterface()
